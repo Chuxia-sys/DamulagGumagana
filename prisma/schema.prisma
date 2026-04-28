@@ -1,0 +1,249 @@
+// FEPC Scheduling System - Premium SaaS Database Schema
+// This schema supports intelligent timetable management with conflict detection
+// Configured for PostgreSQL (Render deployment)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User roles: admin, department_head, faculty
+model User {
+  id             String             @id @default(cuid())
+  uid            String             @unique // Firebase-style UID for compatibility
+  name           String
+  email          String             @unique
+  password       String             // Hashed password
+  role           String             @default("faculty") // admin | department_head | faculty
+  departmentId   String?
+  contractType   String             @default("full-time") // full-time | part-time
+  maxUnits       Int                @default(24)
+  specialization String             @default("[]") // JSON array stored as string
+  image          String?            // Base64 encoded profile image
+  phone          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  
+  department     Department?        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  schedules      Schedule[]
+  preferences    FacultyPreference?
+  notifications  Notification[]
+  scheduleLogs   ScheduleLog[]
+  auditLogs      AuditLog[]
+  scheduleResponses ScheduleResponse[]
+
+  @@index([email])
+  @@index([role])
+  @@index([departmentId])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  code      String?  // Department code (e.g., CS, EE, ME)
+  college   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  users     User[]
+  subjects  Subject[]
+  sections  Section[]
+}
+
+model Subject {
+  id                     String   @id @default(cuid())
+  subjectCode            String   @unique
+  subjectName            String
+  description            String?
+  units                  Int
+  departmentId           String
+  requiredSpecialization String   @default("[]") // JSON array stored as string
+  isActive               Boolean  @default(true)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  
+  department             Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  schedules              Schedule[]
+
+  @@index([departmentId])
+}
+
+model Room {
+  id         String   @id @default(cuid())
+  roomName   String   @unique
+  roomCode   String?  // Room code (e.g., R101, LAB-A)
+  capacity   Int
+  equipment  String   @default("[]") // JSON array stored as string
+  building   String
+  floor      Int?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  schedules  Schedule[]
+}
+
+model Section {
+  id            String   @id @default(cuid())
+  sectionName   String   @unique
+  sectionCode   String?  // Section code (e.g., 1CS-A, 2EE-B)
+  yearLevel     Int      // 1-5
+  departmentId  String
+  studentCount  Int
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  department    Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  schedules     Schedule[]
+
+  @@index([departmentId])
+}
+
+model Schedule {
+  id           String   @id @default(cuid())
+  subjectId    String
+  facultyId    String
+  sectionId    String
+  roomId       String
+  day          String   // Monday, Tuesday, etc.
+  startTime    String   // HH:MM format
+  endTime      String   // HH:MM format
+  status       String   @default("generated") // generated | approved | modified | conflict
+  semester     String?  // e.g., "1st Semester 2024-2025"
+  academicYear String?  // e.g., "2024-2025"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  subject      Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  faculty      User     @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  section      Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  logs         ScheduleLog[]
+  response     ScheduleResponse?
+
+  @@index([facultyId, day, startTime])
+  @@index([roomId, day, startTime])
+  @@index([sectionId, day, startTime])
+}
+
+// Faculty response to schedule assignment
+model ScheduleResponse {
+  id           String   @id @default(cuid())
+  scheduleId   String   @unique
+  facultyId    String
+  status       String   @default("pending") // pending | accepted | rejected
+  reason      String?  // Reason for rejection
+  respondedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  schedule    Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  faculty     User     @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  @@index([facultyId])
+  @@index([status])
+}
+
+model FacultyPreference {
+  id                   String   @id @default(cuid())
+  facultyId            String   @unique
+  preferredDays        String   @default("[]") // JSON array stored as string
+  preferredTimeStart   String   @default("08:00") // HH:MM format
+  preferredTimeEnd     String   @default("17:00") // HH:MM format
+  preferredSubjects    String   @default("[]") // JSON array stored as string
+  unavailableDays      String?  // JSON array of unavailable dates
+  notes                String?  // Additional notes
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  faculty              User     @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  title      String
+  message    String
+  type       String   @default("info") // info | warning | success | error
+  read       Boolean  @default(false)
+  actionUrl  String?  // URL to navigate when clicked
+  createdAt  DateTime @default(now())
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+}
+
+model ScheduleLog {
+  id          String   @id @default(cuid())
+  scheduleId  String
+  modifiedBy  String
+  oldValue    String   @default("{}") // JSON stored as string
+  newValue    String   @default("{}") // JSON stored as string
+  action      String   // created | modified | deleted
+  reason      String?  // Reason for modification
+  timestamp   DateTime @default(now())
+  
+  schedule    Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [modifiedBy], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@index([modifiedBy])
+}
+
+model Conflict {
+  id              String   @id @default(cuid())
+  type            String   // faculty_double_booking | room_double_booking | section_overlap | subject_preference_conflict | specialization_gap | capacity_warning
+  scheduleId1     String?  // Nullable for pre-generation conflicts
+  scheduleId2     String?
+  description     String
+  severity        String   @default("warning") // critical | warning | info
+  suggestedResolution String?
+  resolved        Boolean  @default(false)
+  resolvedBy      String?
+  resolvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  
+  // For pre-generation conflicts (faculty preference conflicts)
+  facultyIds      String?  // JSON array of faculty IDs involved
+  subjectId       String?  // Subject ID if relevant to the conflict
+  generationId    String?  // ID to group conflicts from the same generation session
+
+  @@index([resolved])
+  @@index([type])
+  @@index([generationId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // login | logout | create | update | delete | generate
+  entity    String?  // user | schedule | department, etc.
+  entityId  String?
+  details   String?  @default("{}") // JSON stored as string
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  category    String   @default("general") // general | schedule | notification | security
+  updatedAt   DateTime @updatedAt
+  
+  @@index([category])
+}
