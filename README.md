@@ -49,17 +49,11 @@
 
 ```bash
 # Install dependencies
-bun install
+npm install
 
 # Build for production
-bun run build
+npx next dev -p 3000
 
-# Start development server
-bun run dev
-
-# Start production server
-bun start
-```
 
 Open [http://localhost:3000](http://localhost:3000) to see your application running.
 
